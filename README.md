@@ -6,3 +6,4 @@ noting rules:
 - have comment
  ### if you found a bug in your code, create a `issue` please
 #### notes:
+#### :)
