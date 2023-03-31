@@ -3,6 +3,8 @@ import time
 from flask import *
 from urllib.parse import urlparse
 import requests
+import address
+from mercle import root
 
 class Blockchain:
 
@@ -13,7 +15,8 @@ class Blockchain:
         self.nodes = []
         self.genesis_hash = 64 * "0"
         self.diff = "00000"
-
+        self.public_keys = {}
+        self.balances = {}
 
     def register_nodes(self, address):
         """
@@ -55,8 +58,11 @@ class Blockchain:
 
 
         if self.verify(proof, pv_proof, pv_hash) is not False:
-
+            Mercle = root(self.mem)
+            mercle = Mercle.get_root()
             current_hash = self.verify(proof, pv_proof, pv_hash)
+
+            self.proccess_tnxs()
 
             block = {
             "index": self.index,
@@ -64,7 +70,8 @@ class Blockchain:
             "hash": current_hash,
             "pv-hash": pv_hash,
             "tnxs": self.mem,
-            "proof": proof
+            "proof": proof,
+            "mercle": mercle
             }
 
             self.mem = []
@@ -165,7 +172,12 @@ class Blockchain:
             block = chain[current_index]
             last_block_hash = last_block["hash"]
 
-            if block['pv-hash'] != last_block_hash:
+            if block['pv-hash'] is not last_block_hash:
+                return False
+            
+            Mercle = root(block["tnxs"])
+
+            if block["mercle"] is not Mercle.get_root():
                 return False
 
             if self.verify(block['proof'], last_block['proof'], last_block_hash) != True:
@@ -175,6 +187,75 @@ class Blockchain:
             current_index += 1
             
             return True
+
+    def add_transaction(self, tnx):
+        if self.transaction_verify(tnx):
+            self.mem.append(tnx)
+        else:
+            return False
+
+    def transaction_verify(self, tnx):
+        sender = tnx["sender"]
+        receiver = tnx["receiver"]
+        amount = tnx["amount"]
+        sign = tnx["sign"]
+        pk = None
+        msg = f'{sender}{receiver}{amount}'
+        if sender in self.public_keys is not True:
+            return False
+        else:
+            pk = self.public_keys[sender]
+            if receiver in self.public_keys is not True:
+                return False
+            else:
+                if self.balances[sender] >= amount is not True:
+                    return False
+                else:
+                    if address.verify_signature(sign, msg, pk) is not True:
+                        return False
+                    else:
+                        return True
+
+
+    def tnxs_consensus(self):
+        for node in self.nodes:
+            response = requests.get(f'http://{node}/mempool')
+            if response.status_code is not 200:
+                pass
+            else:
+                mempool = response.json()["mempool"]
+                length = response.json()["len"]
+                if length < self.mem:
+                    pass
+                if self.verify_mempool(mempool):
+                    self.mem = mempool
+                    return True
+                else:
+                    pass
+        return False
+
+    def verify_mempool(self, mempool):
+        for tnx in mempool:
+            if self.transaction_verify(tnx):
+                pass
+            else:
+                return False
+        return True
+
+    def proccess_tnxs(self):
+        for tnx in self.mem:
+            if self.transaction_verify(tnx):
+                sender = tnx["sender"]
+                receiver = tnx["receiver"]
+                amount = tnx["amount"]
+                self.balances[sender] -= amount
+                self.balances[receiver] += amount
+            else:
+                self.mem.remove(tnx)
+
+        return True
+
+
 
 
 while True:
@@ -234,4 +315,4 @@ while True:
                 "message": "new block creation failed"
             }
         return jsonify(response), 201
-    app.run("0.0.0.0", 5000) 
+    app.run("0.0.0.0", 5000)
